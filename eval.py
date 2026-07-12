@@ -1,7 +1,3 @@
-# eval.py
-# Evaluierung: laesst das trainierte Modell (greedy, epsilon=0) N Episoden
-# gegen den Skript-Bot spielen und gibt Win-Rate + Statistiken aus.
-#
 # Nutzung:
 #   python eval.py --episodes 100 --headless
 #   python eval.py --episodes 10 --render          # zum Zuschauen
