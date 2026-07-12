@@ -1,17 +1,3 @@
-# arena_env.py
-# 2D-Arena als Reinforcement-Learning-Environment (Gym-ähnliche API).
-#
-# Wesentliche Design-Entscheidungen:
-#   * Beobachtung = 4 gestapelte Graustufen-Frames (uint8, 60x80). Der Agent
-#     sieht NUR Pixel, keine Koordinaten (rein visuelles Lernen).
-#   * Frame-Skip (Action-Repeat): Eine Agenten-Entscheidung wird für
-#     `frame_skip` Physik-Ticks wiederholt (Atari-Standard, DeepMind 2015).
-#     Dadurch deckt der 4er-Frame-Stack 16 Ticks ab -> Bewegungsrichtung
-#     von Projektilen ist aus dem Stack ablesbar.
-#   * Headless-Betrieb via SDL-Dummy-Treiber -> laeuft ohne Display
-#     (Linux-Server, CI) und unter Windows identisch.
-#   * Rewards sind auf ca. [-5, +5] skaliert (Stabilitaet des TD-Fehlers).
-
 import os
 import math
 import random
@@ -19,15 +5,11 @@ from collections import deque
 
 import numpy as np
 
-# SDL-Treiber MUSS vor pygame.init() gesetzt werden. Wird in
-# GladiatorEnv.__init__ abhaengig vom headless-Flag erledigt, deshalb
-# importieren wir pygame erst dort vollstaendig initialisiert.
+
 import pygame
 import cv2
 
-# ----------------------------------------------------------------------
-# Konstanten
-# ----------------------------------------------------------------------
+
 WIDTH, HEIGHT = 800, 600          # Arena-Groesse in Pixeln
 FRAME_W, FRAME_H = 80, 60         # Beobachtungs-Aufloesung (Netz-Input)
 STACK_SIZE = 4                    # Anzahl gestapelter Frames
@@ -36,13 +18,7 @@ TRAIN_MAX_TICKS = 3600            # Trainings-Timeout: 1 Minute bei 60 FPS.
                                   # -> KEIN Timeout, Runde endet nur durch
                                   # Zerstoerung eines Schiffs.
 
-# Farben. WICHTIG: Die Beobachtung ist GRAUSTUFE
-# (Luminanz = 0.299R + 0.587G + 0.114B). Die Palette ist in Luminanz-
-# Baender getrennt, damit das Netz Freund/Feind unterscheiden kann.
-# LEKTION aus dem gescheiterten Lauf: Ein "dunkles Team" (36-82) auf fast
-# schwarzem Hintergrund (12) hat strukturell kaum Kontrast -- blaue Laser
-# waren im 80x60-Downscale mit ~4 %% Kontrast praktisch unsichtbar, damit
-# war weder Ausweichen noch die Schuss-Kreditvergabe lernbar. Neue Baender:
+
 #   Hintergrund:            ~12   (einziger Dunkel-Anker)
 #   Hindernisse:            41-63 (gross + statisch -> per Form erkennbar)
 #   Blau (Gegner):          95-119 (Mittelband)
@@ -81,41 +57,17 @@ R_GOT_HIT = -0.5   # Rot wird getroffen
 R_WIN = 5.0        # Blau zerstoert
 R_LOSE = -5.0      # Rot zerstoert
 R_TIMEOUT = -2.0   # Basis-Strafe bei Timeout. WICHTIG: Der HP-Differenz-
-                   # Term wird auf <= 0 geklemmt -- Timeout darf NIE positiv
-                   # sein, sonst lernt Rot "einen Treffer landen und dann
-                   # verstecken bis zum Rundenende" als valide Strategie.
+          
 R_TIMEOUT_HP = 2.0 # Zusatz-Strafe bei HP-Rueckstand zum Timeout-Zeitpunkt
 R_SHOOT = 0.0      # Schusskosten DEAKTIVIERT. Lektion aus dem Training:
-                   # Bei P(Treffer) << 1 %% (unerfahrene Policy) ist die
-                   # sofortige, sichere Strafe staerker als der ferne,
-                   # seltene Treffer-Reward -> das Netz lernt "nie
-                   # schiessen" und kann dann nie gewinnen (Explorations-
-                   # falle). Munitionsdisziplin liefert R_WALL.
+               
 R_NEAR = 0.02      # Near-Miss-Shaping: roter Laser passiert Blau < 40 px
-                   # (einmal pro Projektil). Dichtes Zwischensignal in
-                   # Richtung Treffen: "knapp vorbei" > "nicht geschossen".
-                   # Theor. Maximum (jeder Schuss Near-Miss, Cooldown 15):
-                   # 240 * 0.02 = +4.8 < Sieg (+5) -> kein Farming-Exploit.
+               
 R_WALL = -0.02     # Roter Schuss trifft Hindernis (zusaetzlich zu R_SHOOT)
 R_STEP = 0.0       # Zeitstrafe ABGESCHAFFT. Designfehler-Lektion: Mit
-                   # Zeitstrafe war "frueh sterben" (-5.05) besser als
-                   # "lang kaempfen und dann sterben" (-6.8). Solange die
-                   # Policy Kaempfe noch nicht gewinnen kann -- also die
-                   # gesamte Lernphase --, bestraft eine Zeitstrafe genau
-                   # das Verhalten, das gelernt werden soll (ausweichen,
-                   # ueberleben, kaempfen). Jetzt: Ueberleben ist neutral,
-                   # Tod (-5) das Schlechteste, Sieg (+5) das Beste;
-                   # Passivitaet wird allein vom Timeout (-2) bestraft.
-R_APPROACH = 0.001 # Annaeherungs-Shaping, POTENTIALBASIERT (Ng et al.
-                   # 1999): r += R_APPROACH * (Phi(s') - Phi(s)) mit
-                   # Phi(s) = -max(0, Distanz - 250). Nur die Potential-
-                   # form ist exploit-frei: Eine fruehere naive Variante
-                   # belohnte Annaeherung, bestrafte Rueckzug aber nicht
-                   # -- Pendeln ueber die 250-px-Grenze haette bis +9 pro
-                   # Episode gefarmt (> Sieg!). Potentialbasiert ist
-                   # Pendeln exakt netto null; Volldistanz-Annaeherung
-                   # bringt max. ~+0.55 << Sieg (+5), und die optimale
-                   # Policy bleibt beweisbar unveraendert.
+             
+R_APPROACH = 0.001 # Annaeherungs-Shaping, POTENTIALBASIERT 
+         
 R_ALIGN = 0.0005   # Shaping: Achsen-Ausrichtung auf Blau -- NUR bei freier
                    # Sichtlinie, sonst farmt Rot das Shaping hinter Waenden.
                    # Klein gehalten: max. +1.8 pro Episode << Sieg (+5),
@@ -167,10 +119,7 @@ class Bullet:
             self.active = False
 
     def draw(self, surface):
-        # Bewusst dick und lang gezeichnet: In der 80x60-Beobachtung
-        # (10x-Downscale mit Flaechenmittelung) wuerde ein duenner Laser
-        # zu einem kaum sichtbaren ~1-px-Fleck verwaschen -- der Agent
-        # kann nicht lernen auszuweichen, wenn er die Gefahr nicht sieht.
+
         end_x = self.x - self.dx * 14
         end_y = self.y - self.dy * 14
         pygame.draw.line(surface, self.color,
@@ -304,21 +253,12 @@ class GladiatorEnv:
         self.frame_skip = frame_skip
         self.blue_error_rate = blue_error_rate
         self.auto_aim_red = auto_aim_red
-        self.max_ticks = max_ticks  # None = kein Timeout (Mensch-Modus)
-        # Zwei-Phasen-Reward-Schedule: Phase 1 (Bootstrap) nutzt die
-        # Modul-Defaults (Schusskosten 0, Near-Miss +0.02), Phase 2
-        # (Feindisziplin-Feintuning einer bereits treffsicheren Policy)
-        # setzt via CLI Schusskosten > 0 und Near-Miss 0.
+        self.max_ticks = max_ticks  
+                   
         self.r_shoot = R_SHOOT if shot_cost is None else -abs(shot_cost)
         self.r_near = R_NEAR if near_reward is None else near_reward
-        # GEGNER-VERHALTENSMODI (Domain Randomization ueber Gegner-Policies).
-        # Lektion: Der reine Skirmisher schliesst SELBST die Distanz und
-        # stellt sich SELBST in Rots Feuerlinie -- der Agent musste nie
-        # lernen, aktiv zu jagen, und war gegen passive (menschliche)
-        # Gegner out-of-distribution. "mixed" sampelt pro Episode:
-        #   skirmisher 40 %% | passive 30 %% (steht, weicht aus, schiesst
-        #   zurueck -> erzwingt Anruecken) | flee 30 %% (flieht ->
-        #   erzwingt Verfolgung)
+
+                   
         assert blue_mode in ("skirmisher", "passive", "flee", "mixed")
         self.blue_mode = blue_mode
         self.episode_blue_mode = "skirmisher"
@@ -393,26 +333,18 @@ class GladiatorEnv:
         self.blue_last_move = (0, 0)
         self.blue_waypoint = None
 
-        # GEGNER-DIVERSITAET (Fix fuer den Trainings-/Einsatz-Gap):
-        # Der reine Skirmisher liefert sich selbst in Rots Schusslinie --
-        # der Zustand "Gegner kommt NICHT" existierte im Training nie,
-        # Verfolgung wurde deshalb nie gelernt (gegen passive menschliche
-        # Spieler wirkte der Agent ziellos). Passiv- und Flucht-Modus
-        # machen Jagen zur notwendigen Bedingung fuer Treffer und Siege.
+     
         if self.blue_mode == "mixed":
             self.episode_blue_mode = random.choices(
                 ("skirmisher", "passive", "flee"), weights=(0.4, 0.3, 0.3))[0]
         else:
             self.episode_blue_mode = self.blue_mode
 
-        # Verhaltens-Metriken (fuer eval.py): Jagd = niedrige Ø-Distanz,
-        # Feuerdisziplin = Genauigkeit red_hits/red_shots
+ 
         self._dist_accum = 0.0
         self._red_shots = 0
         self._red_hits = 0
 
-        # BUGFIX: Szene ZUERST rendern, dann capturen. Vorher wurde ein
-        # komplett schwarzer Screen in den Frame-Stack geschrieben.
         self._render()
         first_frame = self._capture_frame()
         for _ in range(STACK_SIZE):
@@ -549,7 +481,7 @@ class GladiatorEnv:
         Hardcodierter Skirmisher-Bot (Gegner des Agenten).
 
         SCHWIERIGKEITSREGLER (Lektion aus dem Training): Mit
-        Wahrscheinlichkeit blue_error_rate pro Tick "friert" Blau ein --
+        Wahrscheinlichkeit blue_error_rate pro Tick "friert" Blau ein
         keine Bewegung, kein Schuss (simulierte Reaktionszeit eines
         schwaecheren Spielers). Das skaliert Jagdtempo, Feuerrate UND
         Ausweichen mit einem Knopf. Vorher drosselte die Fehlerquote nur
@@ -625,7 +557,7 @@ class GladiatorEnv:
         elif self.episode_blue_mode == "passive":
             # PASSIV-MODUS: bleibt stehen (repliziert einen passiv
             # wartenden menschlichen Spieler). Weicht nur aus (Zweig oben)
-            # und bestraft unvorsichtige Annaeherung mit Schuessen --
+            # und bestraft unvorsichtige Annaeherung mit Schuessen 
             # Treffer gegen ihn gibt es NUR durch aktives Anruecken.
             pass  # dx1, dy1 bleiben (0, 0)
         elif self.episode_blue_mode == "flee":
