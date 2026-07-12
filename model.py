@@ -1,7 +1,3 @@
-# model.py
-# CNN-Q-Netz (DeepMind-Atari-Architektur, angepasst auf 60x80-Input)
-# + vektorisierter Double-DQN-Trainer.
-
 import os
 
 import torch
@@ -12,8 +8,6 @@ import torch.optim as optim
 
 # ======================================================================
 # 1. CNN-Q-NETZ
-# Input:  [Batch, 4, 60, 80]  (4 gestapelte Graustufen-Frames, float in [0,1])
-# Output: [Batch, N_ACTIONS]  (Q-Wert je Aktion)
 # ======================================================================
 class CNN_QNet(nn.Module):
     def __init__(self, output_size):
@@ -31,7 +25,7 @@ class CNN_QNet(nn.Module):
         # -> 64 * 4 * 6 = 1536 flache Features
         flatten_size = 64 * 4 * 6
 
-        # DUELING-ARCHITEKTUR (Wang et al. 2016):
+        # DUELING-ARCHITEKTUR
         # Q(s,a) = V(s) + A(s,a) - mean_a' A(s,a')
         # Der Value-Stream lernt, WIE GUT ein Zustand generell ist (z. B.
         # "Laser im Anflug = schlecht"), unabhaengig davon, welche Aktion
@@ -102,7 +96,7 @@ class DQNTrainer:
         rewards = torch.as_tensor(rewards, dtype=torch.float, device=device)
         dones = torch.as_tensor(dones, dtype=torch.float, device=device)
 
-        # Q(s, a) fuer die tatsaechlich ausgefuehrten Aktionen
+        # Q(s, a) für die tatsaechlich ausgefuehrten Aktionen
         q_values = self.policy_net(states).gather(1, actions.unsqueeze(1)).squeeze(1)
 
         # Double-DQN-Target (ohne Gradienten), Bootstrap mit gamma^n
