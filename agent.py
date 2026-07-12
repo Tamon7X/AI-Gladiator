@@ -1,7 +1,3 @@
-# agent.py
-# Agent-Klasse: Epsilon-Greedy-Policy, Experience Replay, Target-Sync.
-# Der Trainings-Loop selbst liegt in train.py.
-
 import json
 import os
 import random
@@ -24,32 +20,18 @@ MAX_MEMORY = 30_000      # Transitionen im Replay Buffer.
 BATCH_SIZE = 64
 LR = 2.5e-4
 GAMMA = 0.99
-N_STEP = 5               # n-Step-Returns (Rainbow, Hessel et al. 2018):
-                         # y = sum_i gamma^i * r_i + gamma^n * Q_target(...).
-                         # n=5 statt Standard n=3, WEIL: Laser fliegen
-                         # 15 px/Tick * 4 Ticks = 60 px pro Entscheidung;
-                         # auf Kampfdistanz 150-300 px braucht ein Schuss
-                         # 3-5 Entscheidungen bis zum Ziel. Mit n=5 landet
-                         # der Near-Miss-/Treffer-Reward fuer fast alle
-                         # Distanzen DIREKT im n-Step-Return der Schuss-
-                         # Aktion (statt ueber Bootstrapping durch
-                         # Laser-im-Flug-Zustaende zu muessen).
+N_STEP = 5               # n-Step-Returns 
+                   
 WARMUP_STEPS = 2_000     # Erst sammeln, dann trainieren (stabilere Anfangsphase)
 TRAIN_EVERY = 2          # Gradientenschritt nur jeden 2. Agenten-Schritt.
-                         # DeepMind-Standard ist jeder 4.; jeder 1. (vorher)
-                         # war auf CPU der Flaschenhals -- diese Aenderung
-                         # verdoppelt die Trainingsgeschwindigkeit in
-                         # Echtzeit bei praktisch gleichem Lernfortschritt.
+                   
 TARGET_SYNC = 2_000      # Target-Netz alle N Gradienten-Schritte synchronisieren
 
 # Epsilon-Schedule: linear von 1.0 auf 0.05 ueber EXPLORE_STEPS
 # Agenten-Schritte (jeder Schritt = frame_skip Physik-Ticks).
 EPSILON_START = 1.0
 EPSILON_MIN = 0.10   # 0.10 statt 0.05: Bei langem Weg zum Sieg (7 Treffer)
-                     # braucht es dauerhaft genug Exploration, um aus
-                     # pessimistischen Q-Schaetzungen ("kaempfen lohnt
-                     # nicht") wieder herauszufinden. Klassischer
-                     # Atari-DQN-Wert (Mnih et al. 2015).
+                     
 EXPLORE_STEPS = 100_000
 
 
