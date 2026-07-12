@@ -1,18 +1,3 @@
-# xai.py
-# Explainable AI fuer den trainierten Agenten: "Wohin schaut Rot?"
-#
-# Zwei Verfahren:
-#   1) Vanilla-Gradient-Saliency (Simonyan et al. 2014):
-#      |d max_a Q(s,a) / d s| -- welche Eingabepixel beeinflussen die
-#      Entscheidung am staerksten? Schnell (1 Backward-Pass pro Frame).
-#   2) Occlusion-Analyse (Zeiler & Fergus 2014, optional --occlusion):
-#      Ein grauer Patch wird ueber die Beobachtung geschoben; gemessen
-#      wird der Einbruch des maximalen Q-Werts. Langsamer, aber
-#      modellagnostisch und intuitiv ("wird der Laser verdeckt, sinkt Q").
-#
-# Ausgabe: PNGs in runs/xai/ -- Beobachtung, Heatmap, Overlay nebeneinander,
-# plus gewaehlte Aktion und Q-Wert im Titel.
-#
 # Nutzung:
 #   python xai.py --model models/last_model.pth --auto-aim-red --frames 12
 #   python xai.py --model models/last_model.pth --auto-aim-red --occlusion
