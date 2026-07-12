@@ -1,12 +1,3 @@
-# play.py
-# Mensch (Blau, Pfeiltasten + Leertaste) gegen die trainierte KI (Rot).
-#
-# Wichtig: Das Modell wurde mit frame_skip=4 trainiert, d. h. der 4er-
-# Frame-Stack umspannt 16 Physik-Ticks. Damit die Beobachtungsverteilung
-# beim Spielen identisch bleibt, laeuft das Env hier mit frame_skip=1
-# (fluessige Tastatureingabe), aber die KI wird nur alle 4 Ticks befragt
-# und haelt ihre Aktion dazwischen ("Action Hold").
-
 import argparse
 from collections import deque
 
