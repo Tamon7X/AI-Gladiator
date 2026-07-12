@@ -24,8 +24,7 @@ from arena_env import GladiatorEnv
 from agent import Agent, EPSILON_MIN, EXPLORE_STEPS, TRAIN_EVERY
 
 RUNS_DIR = "./runs"
-PLOT_EVERY = 25          # alle N Episoden Plot/Checkpoint aktualisieren
-ROLLING_WINDOW = 50      # Fenster fuer gleitenden Mittelwert / Win-Rate
+PLOT_EVERY = 25          
 
 
 def save_plot(rewards, mean_rewards, win_rates, path):
@@ -67,20 +66,14 @@ def train(args):
                          "ticks", "epsilon", "mean_reward", "win_rate",
                          "blue_error", "blue_mode", "buffer", "seconds"])
 
-    # AUTO-CURRICULUM: Blau startet fehleranfaellig (leicht zu treffen)
-    # und wird staerker, sobald Rot zuverlaessig gewinnt. Das liefert frueh
-    # dichte positive Rewards (schnelleres Lernen) und am Ende einen
-    # staerkeren Endgegner als eine fixe Fehlerquote.
+  
     blue_error = 0.7 if args.curriculum else args.blue_error
 
     agent = Agent(device, resume=args.resume)
     if args.resume:
         blue_error = agent.load_state_value("blue_error", blue_error)
 
-    # EXPLORE-BOOST: Nach einer Reward-Aenderung (oder wenn die Policy in
-    # einem lokalen Optimum steckt) kann Epsilon einmalig angehoben werden.
-    # Der Agent exploriert dann wieder staerker und lernt unter den neuen
-    # Rewards um; Epsilon zerfaellt anschliessend normal weiter auf 0.05.
+   
     if args.explore_boost is not None:
         eps = max(EPSILON_MIN, min(1.0, args.explore_boost))
         agent.total_steps = int((1.0 - eps) / (1.0 - EPSILON_MIN)
@@ -97,14 +90,7 @@ def train(args):
     recent_rewards = deque(maxlen=ROLLING_WINDOW)
     recent_wins = deque(maxlen=ROLLING_WINDOW)
 
-    # ADAPTIVER REWARD-SCHEDULE (Feindisziplin ohne Explorationsfalle):
-    # Phase 1 (Bootstrap): Schusskosten 0, Near-Miss +0.02 -- eine frische
-    # Policy darf gefahrlos schiessen lernen. Sobald die Treffergenauigkeit
-    # (Treffer/Schuesse) ueber 50 Episoden >= 3 %% liegt, ist der
-    # Erwartungswert eines Durchschnittsschusses bei Kosten 0.02 garantiert
-    # positiv (>= +0.01) -- die Falle KANN nicht mehr zuschnappen. Dann
-    # schaltet das Training selbst auf Phase 2: Kosten 0.02, Near-Miss 0.
-    # Manuell gesetzte --shot-cost/--near-reward deaktivieren die Automatik.
+
     manual_rewards = (args.shot_cost is not None
                       or args.near_reward is not None)
     discipline = bool(agent.load_state_value("discipline", False)) \
@@ -165,11 +151,7 @@ def train(args):
                     env.blue_error_rate = round(env.blue_error_rate - 0.1, 2)
                     games_since_curriculum = 0
                     recent_wins.clear()   # Win-Rate gegen neuen Bot neu messen
-                    # Best-Kriterium pro Stufe zuruecksetzen: Die Reward-
-                    # Skala verschiebt sich mit der Schwierigkeit -- ein
-                    # +11-Mittel gegen den 0.7-Bot wuerde sonst fuer immer
-                    # das "beste Modell" blockieren, obwohl +3 gegen den
-                    # 0.0-Bot die weit staerkere Policy ist.
+                   
                     best_mean = -float("inf")
                     print(f"[Curriculum] Blau verstaerkt: Fehlerquote jetzt "
                           f"{env.blue_error_rate:.2f}")
