@@ -1,12 +1,3 @@
-# train.py
-# Trainings-Loop: Rot (Double-DQN-Agent) lernt gegen den Skirmisher-Bot Blau.
-#
-# Nutzung:
-#   python train.py --headless                 # Training ohne Fenster (schnell)
-#   python train.py --render                   # Training mit Fenster
-#   python train.py --headless --max-games 500 # Reproduzierbarer Kurzlauf
-#   python train.py --headless --resume        # Training fortsetzen
-
 import argparse
 import csv
 import os
@@ -17,7 +8,7 @@ import numpy as np
 import torch
 
 import matplotlib
-matplotlib.use("Agg")  # Kein Display noetig -> laeuft headless auf Linux & Windows
+matplotlib.use("Agg") 
 import matplotlib.pyplot as plt
 
 from arena_env import GladiatorEnv
@@ -25,6 +16,7 @@ from agent import Agent, EPSILON_MIN, EXPLORE_STEPS, TRAIN_EVERY
 
 RUNS_DIR = "./runs"
 PLOT_EVERY = 25          
+ROLLING_WINDOW = 50     
 
 
 def save_plot(rewards, mean_rewards, win_rates, path):
@@ -48,6 +40,9 @@ def save_plot(rewards, mean_rewards, win_rates, path):
     fig.savefig(path, dpi=110)
     plt.close(fig)
 
+# ======================================================================
+# Start des Trainings
+# ======================================================================
 
 def train(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -65,15 +60,17 @@ def train(args):
         logger.writerow(["episode", "reward", "winner", "red_hp", "blue_hp",
                          "ticks", "epsilon", "mean_reward", "win_rate",
                          "blue_error", "blue_mode", "buffer", "seconds"])
+# ======================================================================
+# Curriculum learning
+# ======================================================================
 
-  
     blue_error = 0.7 if args.curriculum else args.blue_error
 
     agent = Agent(device, resume=args.resume)
     if args.resume:
         blue_error = agent.load_state_value("blue_error", blue_error)
 
-   
+
     if args.explore_boost is not None:
         eps = max(EPSILON_MIN, min(1.0, args.explore_boost))
         agent.total_steps = int((1.0 - eps) / (1.0 - EPSILON_MIN)
@@ -90,7 +87,9 @@ def train(args):
     recent_rewards = deque(maxlen=ROLLING_WINDOW)
     recent_wins = deque(maxlen=ROLLING_WINDOW)
 
-
+# ======================================================================
+# Adaptiver Rewards Schedule
+# ======================================================================
     manual_rewards = (args.shot_cost is not None
                       or args.near_reward is not None)
     discipline = bool(agent.load_state_value("discipline", False)) \
@@ -106,7 +105,9 @@ def train(args):
     state = env.reset()
     ep_reward = 0.0
     t0 = time.time()
-
+# ======================================================================
+# Trainingsloop
+# ======================================================================
     try:
         while args.max_games is None or agent.n_games < args.max_games:
             action = agent.get_action(state, training=True)
@@ -114,7 +115,7 @@ def train(args):
 
             agent.remember(state, action, reward, next_state, done)
             if agent.total_steps % TRAIN_EVERY == 0:
-                agent.train_batch()   # Minibatch-Gradientenschritt
+                agent.train_batch()   
 
             state = next_state
             ep_reward += reward
@@ -125,7 +126,9 @@ def train(args):
                 recent_wins.append(1.0 if info["winner"] == "red" else 0.0)
                 recent_acc.append(info["red_hits"] / max(1, info["red_shots"]))
 
-                # Adaptiver Reward-Schedule: Umschaltung auf Feindisziplin
+# ======================================================================
+# Automatische Umschaltung auf Feuerdisziplin
+# ======================================================================
                 if (not discipline and not manual_rewards
                         and len(recent_acc) == ROLLING_WINDOW
                         and float(np.mean(recent_acc)) >= 0.03):
@@ -142,7 +145,9 @@ def train(args):
                 mean_hist.append(mean_reward)
                 winrate_hist.append(win_rate)
 
-                # Curriculum: Bot verstaerken, wenn Rot dominiert
+# ======================================================================
+# Curriculum Stufen Erhöhen
+# ======================================================================
                 games_since_curriculum += 1
                 if (args.curriculum and win_rate >= 0.60
                         and len(recent_wins) >= ROLLING_WINDOW
@@ -150,8 +155,8 @@ def train(args):
                         and env.blue_error_rate > 0.001):
                     env.blue_error_rate = round(env.blue_error_rate - 0.1, 2)
                     games_since_curriculum = 0
-                    recent_wins.clear()   # Win-Rate gegen neuen Bot neu messen
-                   
+                    recent_wins.clear()   
+
                     best_mean = -float("inf")
                     print(f"[Curriculum] Blau verstaerkt: Fehlerquote jetzt "
                           f"{env.blue_error_rate:.2f}")
@@ -170,8 +175,7 @@ def train(args):
                       f"Eps {agent.epsilon:.3f} | BlauErr {env.blue_error_rate:.2f} "
                       f"| Modus: {info['blue_mode']:10s} | Sieger: {info['winner']}")
 
-                # Bestes Modell: hoechster GLEITENDER Mittelwert (statt
-                # einzelner verrauschter Episoden-Rekorde)
+            
                 if (len(recent_rewards) >= ROLLING_WINDOW
                         and mean_reward > best_mean):
                     best_mean = mean_reward
