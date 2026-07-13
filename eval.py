@@ -1,8 +1,3 @@
-# Nutzung:
-#   python eval.py --episodes 100 --headless
-#   python eval.py --episodes 10 --render          # zum Zuschauen
-#   python eval.py --model models/last_model.pth
-
 import argparse
 import random
 
@@ -11,7 +6,9 @@ import torch
 
 from arena_env import GladiatorEnv, N_ACTIONS
 from model import CNN_QNet
-
+# ======================================================================
+# Evaluationsstart
+# ======================================================================
 
 def evaluate(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -23,8 +20,7 @@ def evaluate(args):
         model.eval()
         print(f"[Eval] Modell geladen: {args.model}")
     else:
-        # ZUFALLS-BASELINE: misst die Win-Rate einer untrainierten Policy.
-        # Referenzwert fuer den Lernnachweis: trainiert vs. random.
+       
         print("[Eval] Zufalls-Policy (Baseline, kein Modell)")
 
     env = GladiatorEnv(headless=not args.render, training_mode=True,
@@ -35,7 +31,9 @@ def evaluate(args):
     results = {"red": 0, "blue": 0, "timeout": 0}
     red_hps, ticks_list = [], []
     dists, shots, hits = [], [], []
-
+# ======================================================================
+# Greedy Aktionswahl
+# ======================================================================
     for ep in range(args.episodes):
         state = env.reset()
         done = False
@@ -48,7 +46,9 @@ def evaluate(args):
                 with torch.no_grad():
                     action = int(model(t).argmax(dim=1).item())
             state, _, done, info = env.step(action)
-
+# ======================================================================
+# Verhältnismetriken
+# ======================================================================
         results[info["winner"]] += 1
         red_hps.append(max(0, info["red_hp"]))
         ticks_list.append(info["ticks"])
