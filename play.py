@@ -8,7 +8,7 @@ import torch
 from arena_env import GladiatorEnv, N_ACTIONS, STACK_SIZE
 from model import CNN_QNet
 
-AI_DECISION_INTERVAL = 4  # muss dem frame_skip des Trainings entsprechen
+AI_DECISION_INTERVAL = 4  
 
 
 def play(args):
@@ -31,13 +31,11 @@ def play(args):
     model.eval()
     print(f"Modell geladen: {args.model}")
 
-    # max_ticks=None: KEIN Timeout im Mensch-Modus -- die Runde endet
-    # ausschliesslich durch Zerstoerung eines Schiffs.
+
     env = GladiatorEnv(headless=False, training_mode=False, frame_skip=1,
                        max_ticks=None, auto_aim_red=args.auto_aim_red)
 
-    # Eigener Frame-Stack: wird nur alle AI_DECISION_INTERVAL Ticks
-    # aktualisiert, damit er dem Trainings-Timing entspricht.
+
     ai_frames = deque(maxlen=STACK_SIZE)
     obs = env.reset()
     for _ in range(STACK_SIZE):
