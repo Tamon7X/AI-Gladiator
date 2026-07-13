@@ -9,20 +9,18 @@ import numpy as np
 import pygame
 import cv2
 
-
+# ----------------------------------------------------------------------
+# Größe der Arena und Beobachtungsraum
+# ----------------------------------------------------------------------
 WIDTH, HEIGHT = 800, 600          # Arena-Groesse in Pixeln
 FRAME_W, FRAME_H = 80, 60         # Beobachtungs-Aufloesung (Netz-Input)
 STACK_SIZE = 4                    # Anzahl gestapelter Frames
 TRAIN_MAX_TICKS = 3600            # Trainings-Timeout: 1 Minute bei 60 FPS.
-                                  # Beim Spiel gegen Menschen: max_ticks=None
-                                  # -> KEIN Timeout, Runde endet nur durch
-                                  # Zerstoerung eines Schiffs.
+                                 
+# ----------------------------------------------------------------------
+# Farbpallete und Beobachtbarkeit
+# ----------------------------------------------------------------------
 
-
-#   Hintergrund:            ~12   (einziger Dunkel-Anker)
-#   Hindernisse:            41-63 (gross + statisch -> per Form erkennbar)
-#   Blau (Gegner):          95-119 (Mittelband)
-#   Rot  (der Agent selbst): 181-215 (Hellband)
 BLACK = (10, 10, 15)
 GRID_COLOR = (30, 30, 45)
 RED = (255, 150, 150)          # Ship-Outline Rot, Luminanz 181
@@ -36,14 +34,7 @@ GREEN = (0, 255, 100)
 CYAN = (0, 90, 90)             # Hindernis-Outline, Luminanz 63
 
 # ----------------------------------------------------------------------
-# Diskreter Action Space des roten Agenten: 18 Aktionen =
-# 9 Bewegungsrichtungen (4 Achsen + 4 Diagonalen + Stillstand) x Schuss.
-# Damit hat der Agent EXAKT dieselben Faehigkeiten wie ein menschlicher
-# Spieler mit Pfeiltasten + Leertaste (faires Duell): Bewegung und
-# Schuss in 8 Richtungen (4 Achsen + 4 Diagonalen); die Blickrichtung
-# folgt der Bewegungsrichtung, bzw. bei auto_aim_red der 8-Wege-
-# Zielkorrektur.
-# Format: (dx, dy, shoot)
+# Die 18 Mögliche Aktionen
 # ----------------------------------------------------------------------
 ACTIONS = [(dx, dy, shoot)
            for shoot in (False, True)
@@ -51,28 +42,26 @@ ACTIONS = [(dx, dy, shoot)
            for dx in (-1, 0, 1)]
 N_ACTIONS = len(ACTIONS)  # 18
 
-# Reward-Konstanten (klein skaliert -> stabilere Q-Werte)
+# ----------------------------------------------------------------------
+# Die Reward Konstanten
+# ----------------------------------------------------------------------
 R_HIT = 1.0        # Rot trifft Blau
 R_GOT_HIT = -0.5   # Rot wird getroffen
 R_WIN = 5.0        # Blau zerstoert
 R_LOSE = -5.0      # Rot zerstoert
 R_TIMEOUT = -2.0   # Basis-Strafe bei Timeout. WICHTIG: Der HP-Differenz-
-          
+                  
 R_TIMEOUT_HP = 2.0 # Zusatz-Strafe bei HP-Rueckstand zum Timeout-Zeitpunkt
-R_SHOOT = 0.0      # Schusskosten DEAKTIVIERT. Lektion aus dem Training:
-               
+R_SHOOT = 0.0      # Schusskosten DEAKTIVIERT. 
+                   
 R_NEAR = 0.02      # Near-Miss-Shaping: roter Laser passiert Blau < 40 px
-               
+                   
 R_WALL = -0.02     # Roter Schuss trifft Hindernis (zusaetzlich zu R_SHOOT)
-R_STEP = 0.0       # Zeitstrafe ABGESCHAFFT. Designfehler-Lektion: Mit
-             
-R_APPROACH = 0.001 # Annaeherungs-Shaping, POTENTIALBASIERT 
-         
-R_ALIGN = 0.0005   # Shaping: Achsen-Ausrichtung auf Blau -- NUR bei freier
-                   # Sichtlinie, sonst farmt Rot das Shaping hinter Waenden.
-                   # Klein gehalten: max. +1.8 pro Episode << Sieg (+5),
-                   # sonst wuerde "ausgerichtet bleiben statt gewinnen"
-                   # zur dominanten Strategie (Reward-Hacking).
+R_STEP = 0.0       # Zeitstrafe ABGESCHAFFT.
+                  
+R_APPROACH = 0.001 # Annaeherungs-Shaping, POTENTIALBASIERT (
+                  
+R_ALIGN = 0.0005  
 
 
 class Particle:
@@ -97,7 +86,9 @@ class Particle:
             size = max(1, int((self.timer / 30) * 4))
             pygame.draw.circle(surface, self.color, (int(self.x), int(self.y)), size)
 
-
+# ----------------------------------------------------------------------
+# Projektile
+# ----------------------------------------------------------------------
 class Bullet:
     """Projektil. Fliegt geradlinig, deaktiviert sich am Rand."""
 
@@ -119,7 +110,7 @@ class Bullet:
             self.active = False
 
     def draw(self, surface):
-
+       
         end_x = self.x - self.dx * 14
         end_y = self.y - self.dy * 14
         pygame.draw.line(surface, self.color,
@@ -127,6 +118,9 @@ class Bullet:
         core = (255, 255, 255) if self.color == RED_BULLET else BLUE_CORE
         pygame.draw.circle(surface, core, (int(self.x), int(self.y)), 3)
 
+# ----------------------------------------------------------------------
+# Schiffe und Bewegung
+# ----------------------------------------------------------------------
 
 class Fighter:
     """Ein Schiff (Spieler oder Agent) mit HP, Bewegung und Waffe."""
@@ -216,7 +210,7 @@ class Fighter:
 
 
 # ======================================================================
-# DAS RL-ENVIRONMENT
+# Das eigentliche Reinforcement-Learning-Environment
 # ======================================================================
 class GladiatorEnv:
     """
@@ -254,11 +248,10 @@ class GladiatorEnv:
         self.blue_error_rate = blue_error_rate
         self.auto_aim_red = auto_aim_red
         self.max_ticks = max_ticks  
-                   
+
         self.r_shoot = R_SHOOT if shot_cost is None else -abs(shot_cost)
         self.r_near = R_NEAR if near_reward is None else near_reward
-
-                   
+       
         assert blue_mode in ("skirmisher", "passive", "flee", "mixed")
         self.blue_mode = blue_mode
         self.episode_blue_mode = "skirmisher"
@@ -290,7 +283,9 @@ class GladiatorEnv:
         self.blue_waypoint = None
         self.reset()
 
-    # ------------------------------------------------------------------
+# ======================================================================
+# Zufällige Hindernisse
+# ======================================================================
     def generate_random_obstacles(self, p1_x, p1_y, p2_x, p2_y):
         """2-4 zufaellige Hindernisse mit Sicherheitszonen um beide Spawns."""
         obstacles = []
@@ -314,7 +309,9 @@ class GladiatorEnv:
                 break
         return obstacles
 
-    # ------------------------------------------------------------------
+# ======================================================================
+# Eine neue Episode Beginnt
+# ======================================================================
     def reset(self):
         p1_x = random.randint(50, 350)
         p1_y = random.randint(50, HEIGHT - 50)
@@ -333,18 +330,19 @@ class GladiatorEnv:
         self.blue_last_move = (0, 0)
         self.blue_waypoint = None
 
-     
+        
         if self.blue_mode == "mixed":
             self.episode_blue_mode = random.choices(
                 ("skirmisher", "passive", "flee"), weights=(0.4, 0.3, 0.3))[0]
         else:
             self.episode_blue_mode = self.blue_mode
 
- 
+
         self._dist_accum = 0.0
         self._red_shots = 0
         self._red_hits = 0
 
+   
         self._render()
         first_frame = self._capture_frame()
         for _ in range(STACK_SIZE):
@@ -352,7 +350,9 @@ class GladiatorEnv:
 
         return np.stack(self.frames, axis=0)
 
-    # ------------------------------------------------------------------
+# ======================================================================
+# Von Spielbild zu CNN Beobachtung
+# ======================================================================
     def _capture_frame(self):
         """Screen -> Graustufen-uint8-Frame [60, 80] (Netz-Beobachtung)."""
         raw = pygame.surfarray.array3d(self.screen)      # [W, H, 3]
@@ -475,13 +475,15 @@ class GladiatorEnv:
         dy = 0 if abs(ddy) < 4 else (1 if ddy > 0 else -1)
         return dx, dy
 
-    # ------------------------------------------------------------------
+# ======================================================================
+# Der geskriptete Blaue Bot
+# ======================================================================
     def _blue_policy(self):
         """
         Hardcodierter Skirmisher-Bot (Gegner des Agenten).
 
         SCHWIERIGKEITSREGLER (Lektion aus dem Training): Mit
-        Wahrscheinlichkeit blue_error_rate pro Tick "friert" Blau ein
+        Wahrscheinlichkeit blue_error_rate pro Tick "friert" Blau ein --
         keine Bewegung, kein Schuss (simulierte Reaktionszeit eines
         schwaecheren Spielers). Das skaliert Jagdtempo, Feuerrate UND
         Ausweichen mit einem Knopf. Vorher drosselte die Fehlerquote nur
@@ -528,10 +530,7 @@ class GladiatorEnv:
                     break
 
         if danger:
-            # Geometrisch korrektes Ausweichen SENKRECHT zur Flugbahn
-            # (die alte Achsen-Heuristik war gegen die neuen diagonalen
-            # Laser halb blind). Von den zwei Senkrechten wird die
-            # Richtung Arenamitte gewaehlt (nicht in Waende ausweichen).
+           
             px, py = -danger.dy, danger.dx
             to_cx = WIDTH / 2 - self.player.x
             to_cy = HEIGHT / 2 - self.player.y
@@ -555,16 +554,10 @@ class GladiatorEnv:
             dx1, dy1 = self.blue_wander_dir
             self.blue_pos_history.clear()
         elif self.episode_blue_mode == "passive":
-            # PASSIV-MODUS: bleibt stehen (repliziert einen passiv
-            # wartenden menschlichen Spieler). Weicht nur aus (Zweig oben)
-            # und bestraft unvorsichtige Annaeherung mit Schuessen 
-            # Treffer gegen ihn gibt es NUR durch aktives Anruecken.
+           
             pass  # dx1, dy1 bleiben (0, 0)
         elif self.episode_blue_mode == "flee":
-            # FLUCHT-MODUS: flieht aktiv vor Rot (dominante Achse
-            # vergroessern, gelegentlich Haken schlagen). Erzwingt die
-            # Verfolgung eines BEWEGLICHEN Ziels; Wand-Ecken loest die
-            # Stuck-Erkennung auf.
+        
             dist_x = self.enemy.x - self.player.x
             dist_y = self.enemy.y - self.player.y
             if abs(dist_x) > abs(dist_y):
@@ -596,9 +589,7 @@ class GladiatorEnv:
                     if abs_y > 15:
                         dy1 = 1 if dist_y > 0 else -1
                     else:
-                        # Ausgerichtet: Distanz regeln + Strafe-Jitter,
-                        # damit Blau nicht regungslos in der Schusslinie
-                        # steht (senkrecht zur Kampfachse ausweichen)
+                        
                         if abs_x < 150:
                             dx1 = -1 if dist_x > 0 else 1
                         elif abs_x > 300:
@@ -618,9 +609,7 @@ class GladiatorEnv:
 
         self.blue_last_move = (dx1, dy1)
 
-        # Schiessen bei Ausrichtung (axial ODER diagonal, passend zum
-        # 8-Wege-Zielen) UND freier Sichtlinie. Fluechtender Bot schiesst
-        # seltener (er rennt, statt zu kaempfen).
+        
         dist_x = self.enemy.x - self.player.x
         dist_y = self.enemy.y - self.player.y
         aligned = (abs(dist_x) < 20 or abs(dist_y) < 20
@@ -639,7 +628,9 @@ class GladiatorEnv:
         else:
             fighter.facing_dir = (0, 1 if dist_y > 0 else -1)
 
-    DIAG = 0.7071067811865476  # 1/sqrt(2)
+# ======================================================================
+# 8 Wege Zielkorrektur
+# ======================================================================
 
     def _aim_8way(self, fighter, target):
         """8-Wege-Zielkorrektur: Bei diagonaler Lage zum Ziel
@@ -649,13 +640,16 @@ class GladiatorEnv:
         dist_x = target.x - fighter.x
         dist_y = target.y - fighter.y
         if abs(abs(dist_x) - abs(dist_y)) < 20:
-            fighter.facing_dir = (self.DIAG if dist_x > 0 else -self.DIAG,
-                                  self.DIAG if dist_y > 0 else -self.DIAG)
+            d = 0.7071067811865476  # 1/sqrt(2)
+            fighter.facing_dir = (d if dist_x > 0 else -d,
+                                  d if dist_y > 0 else -d)
         else:
             self._axis_aim(fighter, target)
 
 
-    # ------------------------------------------------------------------
+# ======================================================================
+# Wichtigster Environment-Schritt
+# ======================================================================
     def step(self, action_idx):
         """
         Fuehrt eine Agenten-Aktion fuer `frame_skip` Ticks aus.
@@ -686,10 +680,7 @@ class GladiatorEnv:
                 if shoot1:
                     self.player.shoot(self.bullets)
             else:
-                # MENSCH: Blickrichtung folgt der Bewegung, rastet aber
-                # wie bei allen Schiffen auf 4 Richtungen ein (Pfeil oben =
-                # Schuss nach oben; bei diagonaler Bewegung zaehlt die
-                # Horizontale). KEIN Auto-Aim.
+              
                 keys = pygame.key.get_pressed()
                 dx1 = (-1 if keys[pygame.K_LEFT] else 0) + (1 if keys[pygame.K_RIGHT] else 0)
                 dy1 = (-1 if keys[pygame.K_UP] else 0) + (1 if keys[pygame.K_DOWN] else 0)
@@ -702,8 +693,7 @@ class GladiatorEnv:
             if self.auto_aim_red:
                 self._aim_8way(self.enemy, self.player)   # 8-Wege-Zielkorrektur
             if shoot2:
-                # Schusskosten nur bei tatsaechlich abgegebenem Schuss
-                # (Cooldown 0), nicht beim blossen Halten der Schusstaste
+                
                 if self.enemy.shoot_cooldown == 0:
                     total_reward += self.r_shoot
                     self._red_shots += 1
@@ -715,10 +705,7 @@ class GladiatorEnv:
             self.player.update()
             self.enemy.update()
 
-            # Annaeherungs-Shaping, potentialbasiert: Phi-Differenz mit
-            # Phi(s) = -max(0, dist - 250). Symmetrisch -- Rueckzug ueber
-            # der Grenze kostet exakt, was Annaeherung bringt (kein
-            # Pendel-Farming), unterhalb 250 px neutral (kein Kleben).
+            
             dist_after = math.hypot(self.enemy.x - self.player.x,
                                     self.enemy.y - self.player.y)
             total_reward += R_APPROACH * (max(0.0, dist_before - 250.0)
@@ -754,12 +741,7 @@ class GladiatorEnv:
                                     self.particles.append(
                                         Particle(bullet.x, bullet.y, bullet.color))
 
-                    # NEAR-MISS-SHAPING: Roter Laser passiert Blau knapp
-                    # (< 40 px), max. 1x pro Projektil. Dichtes Lernsignal
-                    # in Richtung Treffen -- "knapp vorbei" wird besser
-                    # bewertet als "gar nicht geschossen", damit die Policy
-                    # das Schiessen nicht als wertlos verwirft, bevor sie
-                    # den ersten echten Treffer entdeckt.
+                    
                     if (bullet.owner is self.enemy and bullet.active
                             and not bullet.near_rewarded):
                         d_near = math.hypot(bullet.x - self.player.x,
@@ -780,10 +762,7 @@ class GladiatorEnv:
             if self.enemy.hp < old_enemy_hp:
                 total_reward += R_GOT_HIT
 
-            # Shaping: Ausrichtung (axial ODER diagonal, passend zu den
-            # 8 Schussrichtungen) NUR belohnen, wenn die Sichtlinie frei
-            # ist. Sonst kann Rot das Shaping hinter einer Wand
-            # risikofrei farmen (Wall-Camping-Exploit).
+            
             sdx = self.enemy.x - self.player.x
             sdy = self.enemy.y - self.player.y
             s_aligned = (abs(sdx) < 20 or abs(sdy) < 20
@@ -800,15 +779,12 @@ class GladiatorEnv:
                 total_reward += R_LOSE
                 done, winner = True, "blue"
             elif self.max_ticks is not None and self.tick >= self.max_ticks:
-                # Timeout ist IMMER negativ: Basis -2, plus Zusatz-Strafe
-                # bei HP-Rueckstand (auf <= 0 geklemmt). Ein HP-Vorsprung
-                # macht den Timeout NICHT positiv -- sonst waere "einmal
-                # treffen, dann verstecken" eine lernbare Gewinnstrategie.
+                
                 hp_diff = (self.enemy.hp - self.player.hp) / 100.0
                 total_reward += R_TIMEOUT + min(0.0, R_TIMEOUT_HP * hp_diff)
                 done, winner = True, "timeout"
 
-            # Im Fenster-Modus jeden Tick rendern (fluessige Darstellung)
+   
             if not self.headless:
                 self._render()
                 pygame.display.flip()
@@ -817,7 +793,7 @@ class GladiatorEnv:
             if done:
                 break
 
-        # Beobachtung: einmal pro Entscheidung rendern/capturen (Speed)
+    
         self._render()
         if not self.headless:
             pygame.display.flip()
