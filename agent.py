@@ -12,28 +12,28 @@ from model import CNN_QNet, DQNTrainer
 # ----------------------------------------------------------------------
 # Hyperparameter
 # ----------------------------------------------------------------------
-MAX_MEMORY = 30_000      # Transitionen im Replay Buffer.
-                         # RAM: 30000 * 2 * 4*60*80 Byte (uint8) ~ 1.15 GB.
-                         # Bei 1-Minuten-Episoden (bis 900 Entscheidungen)
-                         # deckt das ~35-100 Episoden ab; kleinere Buffer
-                         # riskieren katastrophales Vergessen.
+MAX_MEMORY = 30_000     
+                         
 BATCH_SIZE = 64
 LR = 2.5e-4
 GAMMA = 0.99
-N_STEP = 5               # n-Step-Returns 
-                   
-WARMUP_STEPS = 2_000     # Erst sammeln, dann trainieren (stabilere Anfangsphase)
-TRAIN_EVERY = 2          # Gradientenschritt nur jeden 2. Agenten-Schritt.
-                   
-TARGET_SYNC = 2_000      # Target-Netz alle N Gradienten-Schritte synchronisieren
+N_STEP = 5               
 
-# Epsilon-Schedule: linear von 1.0 auf 0.05 ueber EXPLORE_STEPS
-# Agenten-Schritte (jeder Schritt = frame_skip Physik-Ticks).
+WARMUP_STEPS = 2_000     
+TRAIN_EVERY = 2          
+                         
+
+TARGET_SYNC = 2_000      
+
+
 EPSILON_START = 1.0
-EPSILON_MIN = 0.10   # 0.10 statt 0.05: Bei langem Weg zum Sieg (7 Treffer)
-                     
+EPSILON_MIN = 0.10   
+                    
 EXPLORE_STEPS = 100_000
 
+# ======================================================================
+# Experience Replay
+# ======================================================================
 
 class ReplayMemory:
     """FIFO-Puffer fuer Transitionen (s, a, r, s', done). States als uint8."""
@@ -56,14 +56,16 @@ class ReplayMemory:
     def __len__(self):
         return len(self.buffer)
 
-
+# ======================================================================
+# Der Agent und die zwei Netze
+# ======================================================================
 class Agent:
     def __init__(self, device, resume=False, model_dir="./models"):
         self.device = device
         self.model_dir = model_dir
         self.n_games = 0
-        self.total_steps = 0      # Agenten-Schritte (fuer Epsilon-Schedule)
-        self.train_steps = 0      # Gradienten-Schritte (fuer Target-Sync)
+        self.total_steps = 0      
+        self.train_steps = 0      
 
         self.memory = ReplayMemory(MAX_MEMORY)
 
@@ -76,8 +78,7 @@ class Agent:
                 self.policy_net.load_state_dict(
                     torch.load(path, map_location=device))
                 print(f"[Resume] Gewichte aus {path} geladen.")
-                # Trainingszustand (Episodenzaehler, Epsilon-Fortschritt,
-                # Bestwert) exakt wiederherstellen statt zu schaetzen.
+             
                 state_path = os.path.join(model_dir, "train_state.json")
                 if os.path.exists(state_path):
                     with open(state_path) as f:
@@ -87,7 +88,7 @@ class Agent:
                     print(f"[Resume] Zustand: Episode {self.n_games}, "
                           f"Epsilon {self.epsilon:.3f}")
                 else:
-                    # Fallback ohne State-Datei: nicht wieder voll explorieren
+                    
                     self.total_steps = EXPLORE_STEPS // 2
             else:
                 print("[Resume] Kein Checkpoint gefunden, starte frisch.")
@@ -98,11 +99,12 @@ class Agent:
         self.trainer = DQNTrainer(self.policy_net, self.target_net,
                                   lr=LR, gamma=GAMMA, n_step=N_STEP)
 
-        # Zwischenpuffer fuer n-Step-Returns: haelt die letzten N_STEP
-        # 1-Step-Transitionen der laufenden Episode.
+        
         self.nstep_queue = deque()
 
-    # ------------------------------------------------------------------
+# ======================================================================
+# 5 Step Returns
+# ======================================================================
     def _emit_front(self):
         """Schreibt die vorderste Transition des n-Step-Puffers als
         akkumulierte n-Step-Transition in den Replay Buffer:
@@ -132,14 +134,18 @@ class Agent:
                 return json.load(f).get(key, default)
         return default
 
-    # ------------------------------------------------------------------
+# ======================================================================
+# Epsilon Schedule
+# ======================================================================
     @property
     def epsilon(self):
         """Linearer Epsilon-Decay ueber die Agenten-Schritte."""
         frac = min(1.0, self.total_steps / EXPLORE_STEPS)
         return EPSILON_START + frac * (EPSILON_MIN - EPSILON_START)
 
-    # ------------------------------------------------------------------
+# ======================================================================
+# Epsilon Greedy
+# ======================================================================
     def get_action(self, state_uint8, training=True):
         """Epsilon-greedy. state_uint8: np.uint8 [4, 60, 80]."""
         if training:
@@ -152,7 +158,9 @@ class Agent:
         with torch.no_grad():
             return int(self.policy_net(state).argmax(dim=1).item())
 
-    # ------------------------------------------------------------------
+# ======================================================================
+# Erfahrungen und N-step queue
+# ======================================================================
     def remember(self, state, action, reward, next_state, done):
         """Nimmt 1-Step-Transitionen entgegen und schreibt n-Step-
         Transitionen in den Replay Buffer. Am Episodenende werden alle
@@ -168,7 +176,9 @@ class Agent:
             self._emit_front()
             self.nstep_queue.popleft()
 
-    # ------------------------------------------------------------------
+# ======================================================================
+# Miniibatch Training
+# ======================================================================
     def train_batch(self):
         """Ein Gradienten-Schritt auf einem zufaelligen Minibatch.
         Wird ab WARMUP_STEPS jeden Agenten-Schritt aufgerufen."""
